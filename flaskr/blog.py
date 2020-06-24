@@ -18,7 +18,11 @@ def index():
         ' ORDER BY created DESC'
     ).fetchall()
 
-    return render_template('blog/index.html', posts=posts)
+    likes = {}
+    for post in posts:
+        likes[post['id']] = get_users_who_like_post(post['id'])
+
+    return render_template('blog/index.html', posts=posts, likes=likes)
 
 
 @bp.route('/create', methods=('GET', 'POST'))
@@ -64,6 +68,23 @@ def get_post(id, check_author=True):
     return post
 
 
+def get_users_who_like_post(id):
+    db = get_db()
+    users_rows = db.execute(
+        'SELECT user_id'
+        ' FROM likes l JOIN users u ON u.id = l.user_id'
+        ' WHERE post_id = ?', (id,)
+    ).fetchall()
+
+    return [list(dict(row).values())[0] for row in users_rows]
+
+
+@bp.route('/<int:id>')
+def get_single_post(id):
+    post = get_post(id, False)
+    return render_template('blog/single_post.html', post=post)
+
+
 @bp.route('/<int:id>/update', methods=('GET', 'POST'))
 @login_required
 def update(id):
@@ -98,5 +119,32 @@ def delete(id):
     get_post(id)
     db = get_db()
     db.execute('DELETE FROM posts WHERE id = ?', (id,))
+    db.commit()
+    return redirect(url_for('blog.index'))
+
+
+@bp.route('/<int:user_id>/<int:post_id>/like', methods=('POST',))
+@login_required
+def like(user_id, post_id):
+    get_post(post_id, False)
+    db = get_db()
+    db.execute(
+        'INSERT INTO likes (user_id, post_id)'
+        ' VALUES (?, ?)',
+        (user_id, post_id)
+    )
+    db.commit()
+    return redirect(url_for('blog.index'))
+
+
+@bp.route('/<int:user_id>/<int:post_id>/unlike', methods=('POST',))
+@login_required
+def unlike(user_id, post_id):
+    get_post(post_id, False)
+    db = get_db()
+    db.execute(
+        'DELETE FROM likes WHERE user_id = ? AND post_id = ?',
+        (user_id, post_id)
+    )
     db.commit()
     return redirect(url_for('blog.index'))
