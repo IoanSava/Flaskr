@@ -79,10 +79,20 @@ def get_users_who_like_post(id):
     return [list(dict(row).values())[0] for row in users_rows]
 
 
+def get_comments_for_post(id):
+    db = get_db()
+    return db.execute(
+        'SELECT c.id, user_id, body, username'
+        ' FROM comments c JOIN users u ON u.id = c.user_id'
+        ' WHERE post_id = ?', (id,)
+    ).fetchall()
+
+
 @bp.route('/<int:id>')
 def get_single_post(id):
     post = get_post(id, False)
-    return render_template('blog/single_post.html', post=post)
+    comments = get_comments_for_post(id)
+    return render_template('blog/single_post.html', post=post, comments=comments)
 
 
 @bp.route('/<int:id>/update', methods=('GET', 'POST'))
@@ -148,3 +158,75 @@ def unlike(user_id, post_id):
     )
     db.commit()
     return redirect(url_for('blog.index'))
+
+
+@bp.route('/<int:user_id>/<int:post_id>/add-comment', methods=('POST',))
+@login_required
+def add_comment(user_id, post_id):
+    get_post(post_id, False)
+    body = request.form['body']
+    error = None
+
+    if error is not None:
+        flash(error)
+    else:
+        db = get_db()
+        db.execute(
+            'INSERT INTO comments (user_id, post_id, body)'
+            ' VALUES (?, ?, ?)',
+            (user_id, post_id, body)
+        )
+        db.commit()
+
+    return redirect(url_for('blog.get_single_post', id=post_id))
+
+
+def get_comment(id, check_author=True):
+    comment = get_db().execute(
+        'SELECT id, user_id, post_id, body'
+        ' FROM comments'
+        ' WHERE id = ?',
+        (id,)
+    ).fetchone()
+
+    if comment is None:
+        abort(404, "Comment id {0} doesn't exist.".format(id))
+
+    if check_author and comment['user_id'] != g.user['id']:
+        abort(403)
+
+    return comment
+
+
+@bp.route('/<int:id>/update-comment', methods=('GET', 'POST'))
+@login_required
+def update_comment(id):
+    comment = get_comment(id)
+
+    if request.method == 'POST':
+        body = request.form['body']
+        error = None
+
+        if error is not None:
+            flash(error)
+        else:
+            db = get_db()
+            db.execute(
+                'UPDATE comments SET body = ?'
+                ' WHERE id = ?',
+                (body, id)
+            )
+            db.commit()
+            return redirect(url_for('blog.get_single_post', id=comment['post_id']))
+
+    return render_template('blog/update_comment.html', comment=comment)
+
+
+@bp.route('/<int:id>/delete-comment', methods=('POST',))
+@login_required
+def delete_comment(id):
+    comment = get_comment(id)
+    db = get_db()
+    db.execute('DELETE FROM comments WHERE id = ?', (id,))
+    db.commit()
+    return redirect(url_for('blog.get_single_post', id=comment['post_id']))
